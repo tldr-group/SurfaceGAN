@@ -7,20 +7,21 @@ class Config():
     def __init__(self, tag):
         self.tag = tag
         self.path = f'runs/{self.tag}'
-        self.data_path = 'data/Example_ppp.png'
-        self.net_type = 'gan'
-        self.l = 64
+        self.data_path = 'data/2D surface profiles/2D surface profiles/Vertical/pp_2_'
+        self.net_type = 'upsizegan'
+        self.l = 128
         self.n_phases = 2
+        self.img_channels = 2
         # Training hyperparams
-        self.batch_size = 64
+        self.batch_size = 32
         self.beta1 = 0.9
         self.beta2 = 0.999
         self.num_epochs = 250
         self.iters = 1000
-        self.lrg = 0.0001
-        self.lr = 0.0001
+        self.lrg = 0.001
+        self.lr = 0.001
         self.Lambda = 10
-        self.critic_iters = 10
+        self.critic_iters = 5
         self.lz = 4
         self.lf = 4
         self.ngpu = 1
@@ -28,17 +29,17 @@ class Config():
             self.device_name = "cuda:0"
         else:
             self.device_name = 'cpu'
-        self.nz = 100
+        self.nz = 32
         # Architecture
-        self.lays = 4
-        self.laysd = 5
+        self.lays = 5
+        self.laysd = 6
         # kernel sizes
         self.dk, self.gk = [4]*self.laysd, [4]*self.lays
         self.ds, self.gs = [2]*self.laysd, [2]*self.lays
-        self.df, self.gf = [self.n_phases, 64, 128, 256, 512, 1], [
-            self.nz, 512, 256, 128, self.n_phases]
-        self.dp = [1, 1, 1, 1, 0]
-        self.gp = [1, 1, 1, 1, 1]
+        self.df, self.gf = [self.n_phases, 32, 32, 32, 32, 32, 1], [
+            self.nz, 512, 256, 256, 128, self.img_channels]
+        self.dp = [1, 1, 1, 1, 1, 0]
+        self.gp = [1, 1, 1, 1, 1, 1]
 
     def save(self):
         j = {}

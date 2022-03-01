@@ -11,7 +11,7 @@ from torch import nn
 import tifffile
 
 # check for existing models and folders
-def check_existence(tag):
+def check_existence(tag, overwrite):
     """Checks if model exists, then asks for user input. Returns True for overwrite, False for load.
 
     :param tag: [description]
@@ -21,6 +21,8 @@ def check_existence(tag):
     :return: True for overwrite, False for load
     :rtype: [type]
     """
+    if overwrite:
+        return True
     root = f'runs/{tag}'
     check_D = os.path.exists(f'{root}/Disc.pt')
     check_G = os.path.exists(f'{root}/Gen.pt')
@@ -38,7 +40,6 @@ def check_existence(tag):
         else:
             raise AssertionError("Incorrect argument entered.")
     return True
-
 
 # set-up util
 def initialise_folders(tag, overwrite):
@@ -111,7 +112,7 @@ def wandb_save_models(fn):
     wandb.save(fn)
 
 # training util
-def preprocess(data_path):
+def preprocess(data_path, oh=True):
     """[summary]
 
     :param imgs: [description]
@@ -119,15 +120,28 @@ def preprocess(data_path):
     :return: [description]
     :rtype: [type]
     """
-    img = plt.imread(data_path)[:, :, 0]
-    phases = np.unique(img)
-    if len(phases) > 10:
-        raise AssertionError('Image not one hot encoded.')
-    x, y = img.shape
-    img_oh = torch.zeros(len(phases), x, y)
-    for i, ph in enumerate(phases):
-        img_oh[i][img == ph] = 1
-    return img_oh, len(phases)
+    
+    if oh:
+        img_ohs = []
+        for p in ['top', 'bot']:
+            img = plt.imread(f'{data_path}{p}.png')[:, :, 0]
+            phases = np.unique(img)
+            if len(phases) > 10:
+                raise AssertionError('Image not one hot encoded.')
+            x, y = img.shape
+            img_oh = torch.zeros(len(phases), x, y)
+            for i, ph in enumerate(phases):
+                img_oh[i][img == ph] = 1
+            img_ohs.append(img_oh)
+        return img_ohs, len(phases)
+    else:
+        img = torch.tensor(plt.imread(data_path)[:, :, 0])
+        nphases=2
+        x, y = img.shape
+        img_oh = torch.zeros(nphases, x, y)
+        img_oh[0] = img
+        img_oh[1] = 1 - img
+        return img_oh, nphases
 
 def calc_gradient_penalty(netD, real_data, fake_data, batch_size, l, device, gp_lambda, nc):
     """[summary]
@@ -177,11 +191,18 @@ def batch_real(img, l, bs):
     :return: [description]
     :rtype: [type]
     """
+    flip, idx = torch.randint(2, (2,))
+    img = img[idx]
+    if flip:
+        img = torch.flip(img, (-1,))
     n_ph, x_max, y_max = img.shape
     data = torch.zeros((bs, n_ph, l, l))
     for i in range(bs):
-        x, y = torch.randint(x_max - l, (1,)), torch.randint(y_max - l, (1,))
-        data[i] = img[:, x:x+l, y:y+l]
+        y = torch.randint(y_max - l, (1,))
+        data[i] = img[:, :, y:y+l]
+    # data[data==0] += torch.rand_like(data[data==0])*0.1
+    # data[data==1] -= torch.rand_like(data[data==1])*0.1
+    
     return data
 
 # Evaluation util
@@ -198,7 +219,7 @@ def post_process(img):
 
     return img * 255
 
-def generate(c, netG):
+def generate(c, netG, lz):
     """Generate an instance from generator, save to .tif
 
     :param c: Config object class
@@ -208,9 +229,9 @@ def generate(c, netG):
     :return: Post-processed generated instance
     :rtype: torch.Tensor
     """
-    tag, ngpu, nz, lf, pth = c.tag, c.ngpu, c.nz, c.lf, c.path
-
-
+    tag, ngpu, nz, pth = c.tag, c.ngpu, c.nz, c.path
+    real = preprocess(c.data_path)[0]
+    real = [post_process(img.unsqueeze(0)) for img in real]
     out_pth = f"runs/{tag}/out.tif"
     if torch.cuda.device_count() > 1 and c.ngpu > 1:
         print("Using", torch.cuda.device_count(), "GPUs!")
@@ -220,13 +241,62 @@ def generate(c, netG):
         netG = nn.DataParallel(netG, list(range(ngpu))).to(device)
     netG.load_state_dict(torch.load(f"{pth}/Gen.pt"))
     netG.eval()
-    noise = torch.randn(1, nz, lf, lf)
-    raw = netG(noise)
-    gb = post_process(raw)
-    tif = np.array(gb[0], dtype=np.uint8)
-    tifffile.imwrite(out_pth, tif, imagej=True)
-    return tif
+    # netG.eval()
+    imgs = []
+    noise = torch.randn(10, nz, 1, lz)
 
+    raw = netG(noise)
+    img = post_process(raw)
+    img = np.array(img, dtype=np.uint8)
+    a, b, c, d = img.shape
+    img = img.reshape(-1, c)[:,:3093]
+    print(img.shape, real[0].shape)
+    for r in real:
+        r = r[0,:,:,0]
+        idx = np.random.randint(0,9)*128
+        img[idx:idx+128] = r
+        print(idx/128)
+    img = np.stack([img for i in range(3)], -1)
+    print(img.shape)
+    print(pth)
+    plt.imsave(f'{pth}/output.png', img)
+    
+    return img
+
+def opt_generate(c, netG, netD, lz):
+    tag, ngpu, nz, pth = c.tag, c.ngpu, c.nz, c.path
+
+    out_pth = f"runs/{tag}/"
+    if torch.cuda.device_count() > 1 and c.ngpu > 1:
+        print("Using", torch.cuda.device_count(), "GPUs!")
+    device = torch.device("cuda:0" if(
+            torch.cuda.is_available() and ngpu > 0) else "cpu")
+    if (ngpu > 1):
+        netG = nn.DataParallel(netG, list(range(ngpu))).to(device)
+    netG.load_state_dict(torch.load(f"{pth}/Gen.pt"))
+    netG.cuda()
+    netG.eval()
+    netD.load_state_dict(torch.load(f"{pth}/Disc.pt"))
+    netD.cuda()
+    netD.eval()
+    noise = [torch.nn.Parameter(torch.randn(1, nz, 1, lz, requires_grad = True, device=device))]
+    opt = torch.optim.SGD(params=noise, lr=0.01)
+    imgs = []
+    iters=50
+    store = iters//10
+    for i in range(iters):
+        raw = netG(noise[0])
+        loss = -netD(raw).mean()
+        loss.backward()
+        opt.step()
+        print(i, loss)
+        if i%store==0:
+            imgs.append(post_process(raw)[0])
+    gb = np.concatenate(imgs, axis=0)
+    tif = np.array(gb, dtype=np.uint8)
+    tifffile.imwrite(f'{out_pth}out.tif', tif, imagej=True)
+    print(out_pth)
+    return tif
 def progress(i, iters, n, num_epochs, timed):
     """[summary]
 
@@ -253,6 +323,8 @@ def plot_img(img, iter, epoch, path, offline=True):
     :param slcs: [description], defaults to 4
     :type slcs: int, optional
     """
+    if not offline:
+        wandb.log({"raw slices": [wandb.Image(i[0]) for i in img]})
     img = post_process(img)
     if not offline:
         wandb.log({"slices": [wandb.Image(i) for i in img]})

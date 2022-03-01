@@ -22,17 +22,16 @@ def main(mode, offline, tag):
 
     # Initialise Config object
     c = Config(tag)
-
     if mode == 'train':
-        overwrite = util.check_existence(tag)
+        overwrite = util.check_existence(tag, overwrite=True)
         util.initialise_folders(tag, overwrite)
         netD, netG = networks.make_nets(c, overwrite)
         train(c, netG, netD, offline=offline, overwrite=overwrite)
 
     elif mode == 'generate':
         netD, netG = networks.make_nets(c, training=0)
-        net_g = netG()
-        util.generate(c, net_g)
+        net_g, net_d = netG(), netD()
+        util.generate(c, net_g, 97)
         print("Img generated")
 
     elif mode == 'test':
@@ -54,6 +53,5 @@ if __name__ == "__main__":
         tag = args.tag
     else:
         tag = 'test'
-
     main(args.mode, args.offline, tag)
 # main('train', False, 'test')

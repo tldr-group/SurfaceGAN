@@ -66,7 +66,7 @@ def train(c, Gen, Disc, offline=True, overwrite=True):
 
             netD.zero_grad()
 
-            noise = torch.randn(batch_size, nz, lz, lz, device=device)
+            noise = torch.randn(batch_size, nz, 1, lz, device=device)
             fake_data = netG(noise).detach()
 
             real_data = batch_real(training_imgs, l, batch_size).to(device)
@@ -93,7 +93,7 @@ def train(c, Gen, Disc, offline=True, overwrite=True):
             # Generator training
             if i % int(critic_iters) == 0:
                 netG.zero_grad()
-                noise = torch.randn(batch_size, nz, lz, lz, device=device)
+                noise = torch.randn(batch_size, nz, 1, lz, device=device)
                 # Forward pass through G with noise vector
                 fake_data = netG(noise)
                 output = -netD(fake_data).mean()
@@ -118,7 +118,7 @@ def train(c, Gen, Disc, offline=True, overwrite=True):
                     torch.save(netD.state_dict(), f'{path}/Disc.pt')
                     # wandb_save_models(f'{path}/Disc.pt')
                     # wandb_save_models(f'{path}/Gen.pt')
-                    noise = torch.randn(3, nz, lz, lz, device=device)
+                    noise = torch.randn(3, nz, 1, lz*9, device=device)
                     img = netG(noise).detach()
                     plot_img(img, i, epoch, path, offline)
                     progress(i, iters, epoch, num_epochs,
